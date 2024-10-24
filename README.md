@@ -10,6 +10,7 @@ Chen, P., Boukouvalas, Z. & Corizzo, R. A deep fusion model for stock market pre
 If our work is useful please consider citing our paper:
 
 ### Cite:
+```
 @article{chen2024deep,
   title={A deep fusion model for stock market prediction with news headlines and time series data},
   author={Chen, Pinyu and Boukouvalas, Zois and Corizzo, Roberto},
@@ -18,4 +19,5 @@ If our work is useful please consider citing our paper:
   year={2024},
   publisher={Springer}
 }
+```
 
