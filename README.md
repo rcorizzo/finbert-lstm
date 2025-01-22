@@ -2,6 +2,8 @@ Datasets include stock prices, statistical indicators, and news headlines for al
 
 ![GIF](https://imgur.com/E7UgL91.gif)
 
+Experiments were run with Python 3.7.12. Dependencies are listed in the requirements.txt file.
+
 ------  
 # Paper:
 Chen, P., Boukouvalas, Z. & Corizzo, R. A deep fusion model for stock market prediction with news headlines and time series data. <em>Neural Computing & Applications</em> (2024).  [https://doi.org/10.1007/s00521-024-10303-1](https://doi.org/10.1007/s00521-024-10303-1)
