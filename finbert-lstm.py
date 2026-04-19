@@ -1,9 +1,11 @@
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['KERAS_BACKEND']='tensorflow'
+os.environ.setdefault('HF_HOME', os.path.join(os.path.dirname(os.path.abspath(__file__)), '.hf-cache'))
+os.environ.setdefault('HF_HUB_OFFLINE', '1')
 import tensorflow as tf
 tf.config.list_physical_devices('GPU')
-tf.debugging.set_log_device_placement(True)
+tf.debugging.set_log_device_placement(False)
 physical_devices = tf.config.experimental.list_physical_devices('GPU')
 for device in physical_devices:
     tf.config.experimental.set_memory_growth(device, True)
@@ -15,19 +17,24 @@ import matplotlib.pyplot as plt
 import sys
 import tensorflow as tf
 import nltk
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
 
 # from google.colab import drive
 # drive.mount('/content/drive')
 
 """# Load Multimodal data"""
 
-triker1 = 'CVS'
-# triker1 = sys.argv[1]
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_ROOT = os.path.join(BASE_DIR, 'data', 'stock_data')
+OUTPUT_ROOT = os.path.join(BASE_DIR, 'outputs')
+OUTPUT_INFO_DIR = os.path.join(OUTPUT_ROOT, 'stock_info')
+os.makedirs(OUTPUT_INFO_DIR, exist_ok=True)
+
+triker1 = sys.argv[1] if len(sys.argv) > 1 else 'AMT'
 triker = triker1.lower()
 
 
-trend = 'downtrend'
-# trend = sys.argv[2]
+trend = sys.argv[2].lower() if len(sys.argv) > 2 else 'downtrend'
 # trend = 'Uptrend'
 # tmax_trials = 20
 # tepochs = 15
@@ -40,22 +47,21 @@ tepochs = 1
 fepochs = 1
 # startday = '2022-07-01'
 
-# PATH = '/home/pinyu/stock/stock_data/'
-# path = '/home/pinyu/stock/'
-
-PATH = 'C:/Users/Simon/stock/stock_data/'
-path = 'C:/Users/Simon/stock/'
+PATH = DATA_ROOT + os.sep
+path = OUTPUT_ROOT + os.sep
 
 ns = ['adbe', 'amt', 'pld', 'vici', 'schw', 'jpm', 'atvi', 'cvs', 'bio', 'jnj']
 
 def se(triker):
     if triker in ns:
       stock = pd.read_csv(PATH + triker + '_Simon/stocks_ts_'+triker1+'_2021-1-4_2022-9-20.csv')
-      stock = stock[stock['date']>= '2021-01-01']
+      stock['date'] = pd.to_datetime(stock['date'], format='%m/%d/%y')
+      stock = stock[stock['date'] >= pd.Timestamp('2021-01-01')]
       stock = stock.iloc[:,0:25].drop(columns=['symbol', 'NextDayClose', 'NextDayTrend',	'PrevDayTrend'])
     else:
       stock = pd.read_csv(PATH + triker + '_Simon/stocks_ts_'+triker1+'_2021-1-4_2022-9-20.csv')
-      stock = stock[stock['date']>= '2021-01-01']
+      stock['date'] = pd.to_datetime(stock['date'], format='%m/%d/%y')
+      stock = stock[stock['date'] >= pd.Timestamp('2021-01-01')]
       stock = stock.iloc[:,0:25].drop(columns=['symbol', 'NextDayClose', 'NextDayTrend',	'PrevDayTrend', 'splits'])  
     return stock
 
@@ -69,6 +75,7 @@ stock.head(3)
 
 news = pd.read_csv(PATH + triker + '_Simon/Single_newsheadline_day_'+triker+'.csv')
 news = news[['date', 'Titles']]
+news['date'] = pd.to_datetime(news['date'])
 news
 
 Single_newsheadline_day_stock = news.merge(stock, on = 'date')
@@ -79,6 +86,7 @@ Multi_data = Single_newsheadline_day_stock
 # drop NA
 Multi_data = Multi_data.dropna()
 Multi_data = Multi_data.drop(columns=['PrevDayClose'])
+Multi_data['date'] = Multi_data['date'].dt.strftime('%Y-%m-%d')
 Multi_data
 
 Multi_data.iloc[:,2:21]
@@ -116,9 +124,18 @@ freq
 """Removing Stopwords"""
 
 import nltk
-nltk.download('stopwords')
+try:
+    nltk.data.find('corpora/stopwords')
+except LookupError:
+    try:
+        nltk.download('stopwords', quiet=True)
+    except Exception:
+        pass
 from nltk.corpus import stopwords
-stop_word_list = stopwords.words('english')
+try:
+    stop_word_list = stopwords.words('english')
+except LookupError:
+    stop_word_list = list(ENGLISH_STOP_WORDS)
 
 from nltk.tokenize import word_tokenize,sent_tokenize
 from nltk.tokenize.toktok import ToktokTokenizer
@@ -166,25 +183,33 @@ Multi_data['Titles']= Multi_data['Titles'].apply(lambda x: x.strip())
 
 # Multi_data['Titles']= Multi_data['Titles'].apply(remove_between_square_brackets)
 
-"""# Text Pre-processing for BERT"""
+"""# Text Pre-processing for FinBERT"""
 
 # pip install -q transformers
 
-from transformers import BertTokenizer, TFBertForSequenceClassification
+from transformers import AutoTokenizer, TFAutoModel
 from transformers import InputExample, InputFeatures
 
-# pip install bert-for-tf2
-
-#!pip3 install tensorflow_hub
-
-import tensorflow_hub as hub
 import tensorflow as tf
 from tensorflow.keras.models import Model 
-import bert
 
-tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+FINBERT_MODEL_NAME = "ProsusAI/finbert"
+tokenizer = AutoTokenizer.from_pretrained(FINBERT_MODEL_NAME, local_files_only=True)
 
 max_length = 54
+
+class FinBERTEncoderLayer(tf.keras.layers.Layer):
+    def __init__(self, model_name, **kwargs):
+        super().__init__(**kwargs)
+        self.encoder = TFAutoModel.from_pretrained(model_name, local_files_only=True)
+
+    def call(self, inputs):
+        outputs = self.encoder(
+            input_ids=inputs["input_ids"],
+            attention_mask=inputs["attention_mask"],
+            token_type_ids=inputs["token_type_ids"]
+        )
+        return outputs.last_hidden_state, outputs.pooler_output
 
 # convert_examples_to_tf_dataset: tokenize the InputExample objects, then create the required input format with the tokenized objects 
 # finally, create an input dataset that we can feed to the model.
@@ -290,9 +315,13 @@ input_mask = tf.keras.layers.Input(shape=(max_length,), dtype=tf.int32,
                                    name="input_mask")
 segment_ids = tf.keras.layers.Input(shape=(max_length,), dtype=tf.int32,
                                     name="segment_ids")
-bert_layer = hub.KerasLayer("https://tfhub.dev/tensorflow/bert_en_uncased_L-12_H-768_A-12/1",
-                            trainable=True)
-pooled_output, sequence_output = bert_layer([input_word_ids, input_mask, segment_ids])
+
+finbert_encoder = FinBERTEncoderLayer(FINBERT_MODEL_NAME, name="finbert_encoder")
+sequence_output, pooled_output = finbert_encoder({
+    "input_ids": input_word_ids,
+    "attention_mask": input_mask,
+    "token_type_ids": segment_ids
+})
 lstm_out = tf.keras.layers.Bidirectional(LSTM(max_length, name='LSTM'))(sequence_output) # Bidirectional LSTM instead of LSTM
 
 out = tf.keras.layers.Normalization()(lstm_out)
@@ -300,16 +329,16 @@ out = tf.keras.layers.Dense(80, activation="relu")(out)
 out = tf.keras.layers.Normalization()(out)
 out = tf.keras.layers.Dense(36, activation="relu")(out)
 
-#bert_model = Model(inputs=[input_word_ids, input_mask, segment_ids], outputs=[pooled_output, sequence_output])
-bert_model = Model(inputs=[input_word_ids, input_mask, segment_ids], outputs=out)
+# finbert_model = Model(inputs=[input_word_ids, input_mask, segment_ids], outputs=[pooled_output, sequence_output])
+finbert_model = Model(inputs=[input_word_ids, input_mask, segment_ids], outputs=out)
 
-# Keep the Bert layers trainable
-for layer in bert_model.layers:
+# Keep the FinBERT layers trainable
+for layer in finbert_model.layers:
     layer.trainable = True
 
-bert_model.summary()
+finbert_model.summary()
 
-# plot_model(bert_model)
+# plot_model(finbert_model)
 
 
 
@@ -325,7 +354,9 @@ segment_ids = tf.keras.layers.Input(shape=(max_length,), dtype=tf.int32, name="s
 lstm_input = tf.keras.layers.Input(shape=(None, Multi_data.shape[1]-3), dtype=tf.float32, name="Price")
 
 lstm_side = lstm_model(lstm_input)
-text_side = bert_model([input_word_ids, input_mask, segment_ids])
+if isinstance(lstm_side, list):
+    lstm_side = lstm_side[0]
+text_side = finbert_model([input_word_ids, input_mask, segment_ids])
 # Concatenate features from images and texts
 merged = tf.keras.layers.Concatenate()([lstm_side, text_side])
 merged = tf.keras.layers.Normalization()(merged)
@@ -360,7 +391,7 @@ merge_model.compile(loss="binary_crossentropy", optimizer='adam', metrics=["accu
 earlystopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, verbose=1) # patience try 5 or 10
 
 # Save and Load model
-checkpoint_filepath = '/content/drive/MyDrive/aapl_stock_early_fusion_tuning.h5'
+checkpoint_filepath = os.path.join(OUTPUT_ROOT, f'{triker}_{trend}_early_fusion_tuning.weights.h5')
 model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
     filepath=checkpoint_filepath,
     save_weights_only=True,
@@ -621,7 +652,9 @@ class MyHyperModel(keras_tuner.HyperModel) :
         lstm_input = tf.keras.layers.Input(shape=(None, len(Multi_data.axes[1])-3), dtype=tf.float32, name="Price")
 
         lstm_side = lstm_model(lstm_input)
-        text_side = bert_model([input_word_ids, input_mask, segment_ids])
+        if isinstance(lstm_side, list):
+            lstm_side = lstm_side[0]
+        text_side = finbert_model([input_word_ids, input_mask, segment_ids])
         # Concatenate features from images and texts
         merged = tf.keras.layers.Concatenate()([lstm_side, text_side])
 
@@ -647,7 +680,10 @@ class MyHyperModel(keras_tuner.HyperModel) :
         
         # A way to optimize the learning rate while also trying different optimizers
         learning_rate = hp.Choice('lr', [0.0001])
-        K.set_value(model.optimizer.learning_rate, learning_rate)
+        if hasattr(model.optimizer.learning_rate, "assign"):
+            model.optimizer.learning_rate.assign(learning_rate)
+        else:
+            model.optimizer.learning_rate = learning_rate
         
         return model
     
@@ -672,7 +708,7 @@ tuner = keras_tuner.BayesianOptimization(
                         max_trials = tmax_trials, #max candidates to test
                         overwrite=True,
                         directory='BO_search_dir',
-                        project_name='multimodal_lstm_bert')
+                        project_name='multimodal_lstm_finbert')
 
 model.summary()
 
@@ -894,7 +930,7 @@ print(acc)
 crdf = pd.DataFrame(cr).transpose()
 print(crdf)
 
-crdf.to_csv(path + 'stock_results/stock_info/classreport_'+triker + '_' + trend + '_' + acc + '.csv')
+crdf.to_csv(os.path.join(OUTPUT_INFO_DIR, f'classreport_{triker}_{trend}_{acc}.csv'))
 
 conf_matrix = confusion_matrix(true_y, y_PRED)
 
@@ -907,7 +943,7 @@ for i in range(conf_matrix.shape[0]):
 plt.xlabel('Predictions', fontsize=18)
 plt.ylabel('Actuals', fontsize=18)
 plt.title('Confusion Matrix', fontsize=18)
-plt.savefig(path + 'stock_results/stock_info/'+triker + '_' + trend +'_' + acc + 'confusionmatrix.png')
+plt.savefig(os.path.join(OUTPUT_INFO_DIR, f'{triker}_{trend}_{acc}_confusionmatrix.png'))
 plt.show()
 
 obs = np.arange(0,len(y_PRED))
@@ -924,14 +960,14 @@ data = {'': obs,
 df = pd.DataFrame(data)
 print(df)
 
-df.to_csv(path + 'stock_results/stock_info/new_prediction_' + triker + '_' + trend + '_' + acc + '.csv', index=False)
+df.to_csv(os.path.join(OUTPUT_INFO_DIR, f'new_prediction_{triker}_{trend}_{acc}.csv'), index=False)
 
 """# Load model"""
 
 model_structure = merge_model.to_json()
-with open(path + 'stock_results/stock_info/' + trend + '_' + triker + acc + '.json', 'w') as json_file:
+with open(os.path.join(OUTPUT_INFO_DIR, f'{trend}_{triker}{acc}.json'), 'w') as json_file:
     json_file.write(model_structure)
-merge_model.save_weights(path + 'stock_results/stock_info/' + trend + '_' + triker + acc + '.h5')
+merge_model.save_weights(os.path.join(OUTPUT_INFO_DIR, f'{trend}_{triker}{acc}.weights.h5'))
 print('Model saved.')
 
 # from keras.models import model_from_json
