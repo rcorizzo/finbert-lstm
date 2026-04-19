@@ -19,9 +19,6 @@ import tensorflow as tf
 import nltk
 from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
 
-# from google.colab import drive
-# drive.mount('/content/drive')
-
 """# Load Multimodal data"""
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
